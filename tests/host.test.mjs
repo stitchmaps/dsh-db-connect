@@ -148,18 +148,39 @@ test('metadata identifiers retain significant whitespace', async t => {
   assert.equal(captured.table, ' table ')
 })
 
+test('agent can request indexes only for enabled connections, passing exact identifiers', async t => {
+  let captured
+  const { service } = await fixture(t, { database: async (_s, r) => { captured = r; return { table: r.table, primaryKey: [], indexes: [], foreignKeys: [] } }, dispose() {} })
+  const c = await save(service)
+  await assert.rejects(service.action({ op: 'indexes', id: c.id, schema: 's', table: 't' }, { source: 'agent' }), { code: 'ACCESS_DENIED' })
+  const granted = await save(service, { ...c, agentEnabled: true }, '')
+  const value = await service.action({ op: 'indexes', id: granted.id, schema: ' s ', table: ' t ' }, { source: 'agent' })
+  assert.equal(captured.action, 'indexes')
+  assert.equal(captured.schema, ' s ')
+  assert.equal(captured.table, ' t ')
+  assert.deepEqual(value.primaryKey, [])
+  await assert.rejects(service.action({ op: 'indexes', id: granted.id }, { source: 'agent' }), { code: 'VALIDATION' })
+})
+
 const python = process.env.DSH_DB_TEST_PYTHON
 
 test('real worker protocol, SQLite read-only metadata and runtime diagnostics', { skip: !python }, async t => {
   const runner = new ProcessRunner(); t.after(() => runner.dispose())
   const { service, dir } = await fixture(t, runner)
   const database = path.join(dir, 'sample.sqlite')
-  await runner.json(python, ['-B', '-c', 'import json,sqlite3,sys;r=json.load(sys.stdin);c=sqlite3.connect(r["path"]);c.execute("CREATE TABLE sample (id INTEGER PRIMARY KEY, name TEXT NOT NULL)");c.close();print(json.dumps({"ok":True,"value":True}))'], { path: database })
+  await runner.json(python, ['-B', '-c', 'import json,sqlite3,sys;r=json.load(sys.stdin);c=sqlite3.connect(r["path"]);c.execute("CREATE TABLE sample (id INTEGER PRIMARY KEY, name TEXT NOT NULL, status TEXT DEFAULT \'new\')");c.execute("CREATE TABLE ref (id INTEGER PRIMARY KEY)");c.execute("CREATE TABLE child (id INTEGER PRIMARY KEY, sample_id INTEGER, FOREIGN KEY (sample_id) REFERENCES sample(id))");c.execute("CREATE INDEX idx_child ON child(sample_id)");c.close();print(json.dumps({"ok":True,"value":True}))'], { path: database })
   await service.action({ op: 'settings', settings: { pythonPath: python, timeoutSeconds: 15 } })
   const c = await save(service, { name: 'Local sample', type: 'sqlite', sqlitePath: database, agentEnabled: true }, '')
   const value = await service.action({ op: 'columns', id: c.id, schema: 'main', table: 'sample' }, { source: 'agent' })
   assert.equal(value.items[1].name, 'name')
   assert.equal(value.items[1].nullable, false)
+  const byName = Object.fromEntries(value.items.map(item => [item.name, item]))
+  assert.equal(byName.status.default, "'new'")
+  assert.equal(byName.status.comment, null)
+  const indexes = await service.action({ op: 'indexes', id: c.id, schema: 'main', table: 'child' }, { source: 'agent' })
+  assert.deepEqual(indexes.primaryKey, ['id'])
+  assert.equal(indexes.foreignKeys.length, 1)
+  assert.equal(indexes.foreignKeys[0].references.table, 'sample')
   assert.equal((await service.action({ op: 'test', id: c.id })).connected, true)
   const diag = await service.action({ op: 'diagnostics' })
   assert.equal(diag.drivers.sqlite3.available, true)

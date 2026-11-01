@@ -145,6 +145,49 @@ class DriverTests(unittest.TestCase):
         conn.cursor.return_value.close.assert_called_once()
         self.assertEqual([call[0] for call in conn.method_calls][-2:], ['rollback', 'close'])
 
+    def test_remote_indexes_generic_and_oracle(self):
+        # Generic (PostgreSQL-style) information_schema path.
+        conn = Mock()
+        results = {
+            'PRIMARY KEY': [('id',)],
+            'FOREIGN KEY': [('fk_child_parent', 'parent_id', 1, 'parent', 'id', 'public')],
+            'index': [],
+        }
+        calls = {'n': 0}
+
+        def fetchall():
+            return []
+
+        def execute(sql, params):
+            results_holder.append((sql, params))
+
+        results_holder = []
+        conn.cursor.return_value.execute.side_effect = lambda sql, params: results_holder.append((sql, params))
+        conn.cursor.return_value.fetchall.side_effect = [results['PRIMARY KEY'], results['FOREIGN KEY'], results['index']]
+        value = worker.generic_indexes(conn, 'postgresql', 's', 'child')
+        self.assertEqual(value['primaryKey'], ['id'])
+        self.assertEqual(value['foreignKeys'][0]['columns'], ['parent_id'])
+        self.assertEqual(value['foreignKeys'][0]['references']['table'], 'parent')
+        # Schema/table are bound as parameters, never interpolated into SQL.
+        self.assertEqual(results_holder[0][1], ('s', 'child'))
+        self.assertNotIn("'s'", results_holder[0][0])
+
+        # Oracle path with mocked catalog rows.
+        conn = Mock()
+        oracle_rows = {
+            'ind': [('PK_CHILD', 'UNIQUE', 'ID', 1), ('IDX_TAG', 'NONUNIQUE', 'TAG', 1)],
+            'cons': [('PK_CHILD', 'ID', 1)],
+            'fk': [('FK_C', 'PARENT_ID', 'OTHER', 'PARENT', 'ID')],
+        }
+        conn.cursor.return_value.execute.side_effect = [None, None, None]
+        conn.cursor.return_value.fetchall.side_effect = [oracle_rows['ind'], oracle_rows['cons'], oracle_rows['fk']]
+        ov = worker.oracle_indexes(conn, 'S', 'CHILD')
+        self.assertEqual(ov['primaryKey'], ['ID'])
+        names = {idx['name']: idx for idx in ov['indexes']}
+        self.assertTrue(names['PK_CHILD']['unique'])
+        self.assertEqual(names['IDX_TAG']['columns'], ['TAG'])
+        self.assertEqual(ov['foreignKeys'][0]['references']['table'], 'PARENT')
+
     def test_diagnostics_never_connects(self):
         m = self.module()
         m.__version__ = '1.2.3'
@@ -188,7 +231,7 @@ class SQLiteTests(unittest.TestCase):
     def test_unusual_identifiers_and_pagination(self):
         r = {'action': 'columns', 'connection': self.c, 'table': 'odd"; --', 'limit': 1}
         v = worker.dispatch(r)
-        self.assertEqual(v['items'], [{'name': 'col"umn', 'dataType': 'TEXT', 'nullable': False, 'ordinal': 1}])
+        self.assertEqual(v['items'], [{'name': 'col"umn', 'dataType': 'TEXT', 'nullable': False, 'ordinal': 1, 'default': None, 'comment': None}])
         self.assertTrue(v['hasMore'])
         v = worker.dispatch(dict(r, offset=1))
         self.assertEqual(v['items'][0]['name'], 'n')
@@ -205,6 +248,38 @@ class SQLiteTests(unittest.TestCase):
         result = worker.dispatch({'action': 'columns', 'connection': self.c, 'table': 'x"); DROP TABLE z; --'})
         self.assertEqual(result['items'], [])
         self.assertEqual(len(worker.dispatch({'action': 'tables', 'connection': self.c})['items']), 3)
+
+    def test_columns_report_default(self):
+        conn = sqlite3.connect(self.path)
+        conn.execute("CREATE TABLE dflt (id INTEGER PRIMARY KEY, status TEXT DEFAULT 'new', note TEXT)")
+        conn.close()
+        v = worker.dispatch({'action': 'columns', 'connection': self.c, 'table': 'dflt'})
+        by_name = {item['name']: item for item in v['items']}
+        self.assertEqual(by_name['status']['default'], "'new'")
+        self.assertIsNone(by_name['note']['default'])
+        self.assertIsNone(by_name['status']['comment'])
+
+    def test_indexes_primary_unique_foreign_key(self):
+        conn = sqlite3.connect(self.path)
+        conn.executescript('CREATE TABLE parent (id INTEGER PRIMARY KEY, code TEXT UNIQUE);'
+                           'CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER, tag TEXT, FOREIGN KEY (parent_id) REFERENCES parent(id));'
+                           'CREATE INDEX idx_child_tag ON child(tag);')
+        conn.close()
+        v = worker.dispatch({'action': 'indexes', 'connection': self.c, 'table': 'child'})
+        self.assertEqual(v['table'], 'child')
+        self.assertEqual(v['primaryKey'], ['id'])
+        names = {idx['name']: idx for idx in v['indexes']}
+        self.assertTrue(any(idx['primary'] and idx['columns'] == ['id'] for idx in v['indexes']))
+        self.assertEqual(names['idx_child_tag']['columns'], ['tag'])
+        self.assertEqual(len(v['foreignKeys']), 1)
+        fk = v['foreignKeys'][0]
+        self.assertEqual(fk['columns'], ['parent_id'])
+        self.assertEqual(fk['references']['table'], 'parent')
+        self.assertEqual(fk['references']['columns'], ['id'])
+        # Non-existent table yields an empty structure rather than an error.
+        empty = worker.dispatch({'action': 'indexes', 'connection': self.c, 'table': 'missing'})
+        self.assertEqual(empty['indexes'], [])
+        self.assertEqual(empty['foreignKeys'], [])
 
 
 class ProtocolTests(unittest.TestCase):

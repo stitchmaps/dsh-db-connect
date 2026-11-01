@@ -27,7 +27,7 @@ def invalid():
 
 
 def validate(r):
-    if not isinstance(r, dict) or r.get('action') not in ('diagnostics', 'test', 'schemas', 'tables', 'columns'):
+    if not isinstance(r, dict) or r.get('action') not in ('diagnostics', 'test', 'schemas', 'tables', 'columns', 'indexes'):
         invalid()
     if r['action'] == 'diagnostics':
         return
@@ -49,7 +49,7 @@ def validate(r):
     for key in ('schema', 'table'):
         if key in r and (not isinstance(r[key], str) or not r[key] or '\x00' in r[key] or len(r[key]) > 1024):
             invalid()
-    if r['action'] == 'columns' and not r.get('table'):
+    if r['action'] in ('columns', 'indexes') and not r.get('table'):
         invalid()
     if c['type'] == 'sqlite':
         if not c.get('sqlitePath'):
@@ -192,39 +192,51 @@ def metadata(conn, r):
             rows = [('main',)][offset:offset + count]
         elif action == 'tables':
             rows = query(conn, "SELECT name, 'main', type FROM sqlite_master WHERE type IN ('table','view') AND name NOT GLOB 'sqlite_*' ORDER BY name LIMIT ? OFFSET ?", (count, offset), count)
-        else:
+        elif action == 'columns':
             identifier = '"' + r['table'].replace('"', '""') + '"'
             cur = conn.cursor()
             try:
+                # table_xinfo includes generated/hidden columns; index 6 is hidden flag (0 = ordinary).
+                cur.execute('PRAGMA main.table_xinfo(' + identifier + ')')
+                all_rows = cur.fetchall()
+            except sqlite3.OperationalError:
+                # Older SQLite lacks table_xinfo; fall back to table_info (no default/hidden columns).
                 cur.execute('PRAGMA main.table_info(' + identifier + ')')
-                for _ in range(offset):
-                    if cur.fetchone() is None:
-                        break
-                rows = [(v[1], v[2], not bool(v[3]), v[0] + 1) for v in cur.fetchmany(count)]
+                all_rows = [tuple(row) + (0,) for row in cur.fetchall()]
             finally:
                 cur.close()
+            plain = [v for v in all_rows if len(v) < 7 or v[6] in (0, None)]
+            rows = [(v[1], v[2], not bool(v[3]), v[0] + 1, v[4], None) for v in plain[offset:offset + count]]
+        else:
+            return sqlite_indexes(conn, r['table'])
     else:
         if kind == 'oracle':
+            if action == 'indexes':
+                return oracle_indexes(conn, schema, r['table'])
             if action == 'schemas':
                 base, order = 'SELECT username FROM all_users', 'username'
             elif action == 'tables':
                 base, order = "SELECT object_name, owner, object_type FROM all_objects WHERE owner = :1 AND object_type IN ('TABLE','VIEW')", 'object_name, object_type'
                 params = [schema]
             else:
-                base, order = 'SELECT column_name, data_type, nullable, column_id FROM all_tab_columns WHERE owner = :1 AND table_name = :2', 'column_id'
+                base = "SELECT c.column_name, c.data_type, c.nullable, c.column_id, c.data_default, m.comments FROM all_tab_columns c LEFT JOIN all_col_comments m ON m.owner = c.owner AND m.table_name = c.table_name AND m.column_name = c.column_name WHERE c.owner = :1 AND c.table_name = :2"
+                order = 'c.column_id'
                 params = [schema, r['table']]
             n = len(params)
             sql = 'SELECT * FROM (SELECT page_rows.*, ROWNUM page_number FROM (' + base + ' ORDER BY ' + order + ') page_rows WHERE ROWNUM <= :' + str(n + 1) + ') WHERE page_number > :' + str(n + 2) + ' ORDER BY page_number'
             params.extend([offset + count, offset])
         else:
             marker = '?' if kind == 'sqlserver' else '%s'
+            if action == 'indexes':
+                return generic_indexes(conn, kind, schema, r['table'])
             if action == 'schemas':
                 base, order = 'SELECT schema_name FROM information_schema.schemata', 'schema_name'
             elif action == 'tables':
                 base, order = 'SELECT table_name, table_schema, table_type FROM information_schema.tables WHERE table_schema = ' + marker, 'table_name, table_type'
                 params = [schema]
             else:
-                base, order = 'SELECT column_name, data_type, is_nullable, ordinal_position FROM information_schema.columns WHERE table_schema = ' + marker + ' AND table_name = ' + marker, 'ordinal_position'
+                base = 'SELECT column_name, data_type, is_nullable, ordinal_position, column_default FROM information_schema.columns WHERE table_schema = ' + marker + ' AND table_name = ' + marker
+                order = 'ordinal_position'
                 params = [schema, r['table']]
             sql = base + ' ORDER BY ' + order
             if kind == 'sqlserver':
@@ -241,9 +253,139 @@ def metadata(conn, r):
         elif action == 'tables':
             item = {'name': str(row[0]), 'schema': str(row[1]), 'kind': 'view' if 'VIEW' in str(row[2]).upper() else 'table'}
         else:
-            item = {'name': str(row[0]), 'dataType': str(row[1]), 'nullable': row[2] is True or str(row[2]).upper() in ('YES', 'Y', '1'), 'ordinal': int(row[3])}
+            default = row[4] if len(row) > 4 else None
+            comment = row[5] if len(row) > 5 else None
+            item = {'name': str(row[0]), 'dataType': str(row[1]), 'nullable': row[2] is True or str(row[2]).upper() in ('YES', 'Y', '1'), 'ordinal': int(row[3]),
+                    'default': None if default is None else str(default)[:2000], 'comment': None if comment is None else str(comment)[:2000]}
         items.append(item)
     return {'items': items, 'hasMore': len(rows) > limit, 'offset': offset, 'limit': limit}
+
+
+def sqlite_indexes(conn, table):
+    """Primary-key, unique and foreign-key structure for one SQLite table (main schema)."""
+    identifier = '"' + table.replace('"', '""') + '"'
+    cur = conn.cursor()
+    try:
+        # Primary key columns come from table_info (flag column 5 = pk sequence), which also
+        # covers the INTEGER PRIMARY KEY rowid alias that has no autoindex entry.
+        cur.execute('PRAGMA main.table_info(' + identifier + ')')
+        pk_columns = [(int(v[5]), str(v[1])) for v in cur.fetchall() if len(v) > 5 and v[5]]
+        primary = [name for _pos, name in sorted(pk_columns)]
+        cur.execute('PRAGMA main.index_list(' + identifier + ')')
+        index_rows = cur.fetchall()  # (seq, name, unique, origin, partial)
+        indexes = []
+        for row in index_rows:
+            name, unique, origin = str(row[1]), bool(row[2]), str(row[3])
+            if name.startswith('sqlite_autoindex') and origin != 'pk':
+                # Skip implicit unique indexes that back an explicit constraint we report elsewhere.
+                continue
+            cur.execute('PRAGMA main.index_info(' + '"' + name.replace('"', '""') + '")')
+            columns = [str(v[2]) for v in cur.fetchall() if v[2] is not None]
+            indexes.append({'name': name, 'unique': unique, 'primary': origin == 'pk', 'columns': columns})
+        cur.execute('PRAGMA main.foreign_key_list(' + identifier + ')')
+        fk_rows = cur.fetchall()  # (id, seq, table, from, to, on_update, on_delete, match)
+        foreign, by_id = [], {}
+        for row in fk_rows:
+            key = row[0]
+            entry = by_id.get(key)
+            if entry is None:
+                entry = {'name': 'fk_' + str(key), 'columns': [], 'references': {'table': str(row[2]), 'columns': []}, 'onUpdate': str(row[5]) if row[5] else None, 'onDelete': str(row[6]) if row[6] else None}
+                by_id[key] = entry
+                foreign.append(entry)
+            entry['columns'].append(str(row[3]))
+            entry['references']['columns'].append(str(row[4]) if row[4] is not None else None)
+    finally:
+        cur.close()
+    if primary and not any(i['primary'] for i in indexes):
+        indexes.insert(0, {'name': 'PRIMARY', 'unique': True, 'primary': True, 'columns': primary})
+    return {'table': table, 'primaryKey': primary, 'indexes': indexes, 'foreignKeys': foreign}
+
+
+def oracle_indexes(conn, schema, table):
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT i.index_name, i.uniqueness, c.column_name, c.column_position FROM all_ind_columns c JOIN all_indexes i ON i.index_name = c.index_name AND i.table_owner = c.table_owner AND i.table_name = c.table_name WHERE c.table_owner = :1 AND c.table_name = :2 ORDER BY i.index_name, c.column_position", (schema, table))
+        grouped, order = {}, []
+        for name, uniqueness, column, _pos in cur.fetchall():
+            name = str(name)
+            if name not in grouped:
+                grouped[name] = {'name': name, 'unique': str(uniqueness).upper() == 'UNIQUE', 'primary': False, 'columns': []}
+                order.append(name)
+            grouped[name]['columns'].append(str(column))
+        cur.execute("SELECT constraint_name, column_name, position FROM all_cons_columns WHERE owner = :1 AND table_name = :2 AND constraint_name IN (SELECT constraint_name FROM all_constraints WHERE owner = :1 AND table_name = :2 AND constraint_type = 'P') ORDER BY position", (schema, table))
+        primary = [str(row[1]) for row in cur.fetchall()]
+        cur.execute("SELECT c.constraint_name, cc.column_name, r.owner, r.table_name, rcc.column_name FROM all_constraints c JOIN all_cons_columns cc ON cc.owner = c.owner AND cc.constraint_name = c.constraint_name AND cc.table_name = c.table_name JOIN all_constraints r ON r.owner = c.r_owner AND r.constraint_name = c.r_constraint_name LEFT JOIN all_cons_columns rcc ON rcc.owner = r.owner AND rcc.constraint_name = r.constraint_name AND rcc.position = cc.position WHERE c.owner = :1 AND c.table_name = :2 AND c.constraint_type = 'R' ORDER BY c.constraint_name, cc.position", (schema, table))
+        foreign, by_name = [], {}
+        for (constraint, column, ref_owner, ref_table, ref_column) in cur.fetchall():
+            entry = by_name.get(constraint)
+            if entry is None:
+                entry = {'name': str(constraint), 'columns': [], 'references': {'table': str(ref_table), 'columns': []}, 'onUpdate': None, 'onDelete': None}
+                by_name[constraint] = entry
+                foreign.append(entry)
+            entry['columns'].append(str(column))
+            entry['references']['columns'].append(str(ref_column) if ref_column is not None else None)
+            entry['references'].setdefault('schema', str(ref_owner))
+    finally:
+        cur.close()
+    return {'table': table, 'primaryKey': primary, 'indexes': [grouped[n] for n in order], 'foreignKeys': foreign}
+
+
+def generic_indexes(conn, kind, schema, table):
+    marker = '?' if kind == 'sqlserver' else '%s'
+    cur = conn.cursor()
+
+    def fetch(sql, params):
+        try:
+            cur.execute(sql, params)
+            return cur.fetchall()
+        except Exception:
+            return []
+
+    try:
+        pk_rows = fetch(
+            'SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu '
+            'ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name '
+            "WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = " + marker + ' AND tc.table_name = ' + marker + ' ORDER BY kcu.ordinal_position',
+            (schema, table))
+        primary = [str(row[0]) for row in pk_rows]
+        fk_rows = fetch(
+            'SELECT kcu.constraint_name, kcu.column_name, kcu.ordinal_position, ccu.table_name, ccu.column_name, ccu.table_schema '
+            'FROM information_schema.table_constraints tc '
+            'JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name '
+            'LEFT JOIN information_schema.referential_constraints rc ON rc.constraint_name = tc.constraint_name AND rc.constraint_schema = tc.table_schema '
+            'LEFT JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = rc.unique_constraint_name AND ccu.constraint_schema = rc.unique_constraint_schema '
+            "WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = " + marker + ' AND tc.table_name = ' + marker + ' ORDER BY kcu.constraint_name, kcu.ordinal_position',
+            (schema, table))
+        foreign, by_name = [], {}
+        for (constraint, column, _pos, ref_table, ref_column, ref_schema) in fk_rows:
+            entry = by_name.get(constraint)
+            if entry is None:
+                entry = {'name': str(constraint), 'columns': [], 'references': {'table': str(ref_table) if ref_table else None, 'columns': []}, 'onUpdate': None, 'onDelete': None}
+                if ref_schema is not None and ref_schema != schema:
+                    entry['references']['schema'] = str(ref_schema)
+                by_name[constraint] = entry
+                foreign.append(entry)
+            entry['columns'].append(str(column))
+            entry['references']['columns'].append(str(ref_column) if ref_column is not None else None)
+        table_id = 'TABLE_NAME'
+        idx_rows = fetch(
+            'SELECT i.index_name, i.is_unique, i.index_type, c.column_name, c.ordinal_position FROM information_schema.indexes i '
+            'JOIN information_schema.index_columns c ON c.index_name = i.index_name AND c.table_schema = i.table_schema AND c.table_name = i.table_name '
+            'WHERE i.table_schema = ' + marker + ' AND i.table_name = ' + marker + ' ORDER BY i.index_name, c.ordinal_position',
+            (schema, table)) if kind != 'sqlserver' else []
+    finally:
+        cur.close()
+    # information_schema.indexes is not universally available (e.g. PostgreSQL); report keys only when empty.
+    grouped, order = {}, []
+    for (name, unique, _type, column, _pos) in idx_rows:
+        name = str(name)
+        if name not in grouped:
+            is_primary = name.upper() in ('PRIMARY', 'PRIMARY_KEY')
+            grouped[name] = {'name': name, 'unique': bool(unique) or is_primary, 'primary': is_primary, 'columns': []}
+            order.append(name)
+        if column is not None:
+            grouped[name]['columns'].append(str(column))
+    return {'table': table, 'primaryKey': primary, 'indexes': [grouped[n] for n in order], 'foreignKeys': foreign}
 
 
 def test_connection(conn, c, started):

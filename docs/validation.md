@@ -1,3 +1,22 @@
+# 验证记录 — 0.2.0
+
+验证日期：2026-11-01（本机，临时合成数据）。相对 0.1.0：新增字段默认值/注释与 `indexes`（主键/索引/外键）能力。
+
+## 0.2.0 新增项
+
+- Node 自动化测试：**26 项通过，0 跳过**（新增：智能体仅对已启用连接请求 `indexes`；真实 SQLite 端到端校验字段默认值与索引/外键）。
+- Python unittest：**21 项通过**（新增：SQLite 字段默认值、主键/唯一/外键/索引；PostgreSQL 与 Oracle 远程 `indexes` mock）。
+- Client VM 契约新增：字段视图挂载「索引与键」区块，渲染不崩溃。
+- 所有 `lib/*.js` 的 `node --check` 通过。
+
+## 0.2.0 未验证与边界
+
+- 远程库 `indexes` 仅在 mock 下验证；未连真实 Oracle/PostgreSQL/MySQL/SQL Server 实测索引与外键返回。
+- PostgreSQL 无标准 `information_schema.indexes` 视图，当前仅返回主键与外键；SQL Server 同样只返回主键与外键（未接索引视图）。
+- 注释：Oracle 取 `all_col_comments`；SQLite 无注释概念恒为 null；通用 information_schema 路径当前不取注释（留 null）。
+
+---
+
 # 验证记录 — 0.1.0
 
 验证日期：2026-10-31。使用 Windows 本机及临时合成数据；不读取或连接现有业务项目数据库。

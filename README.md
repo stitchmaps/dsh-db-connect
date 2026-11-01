@@ -11,15 +11,16 @@ An independent DeepSeek Harness plugin for intranet database connections, driver
 - Windows CurrentUser DPAPI encryption at rest. No password echo, command-line secrets, or credentials in model tool arguments/results.
 - Per-connection assistant metadata access, disabled by default.
 - Shared Host application service for UI and model tools; bounded subprocesses, cancellation and deadlines.
+- Paged column detail (data type, nullability, default, comment) and a key/structure view (primary key, unique and other indexes, foreign keys).
 - English/Chinese UI using DSH theme tokens.
 
-Version 0.1.0 manages **connections and metadata only**. It does not execute arbitrary SQL, read application rows, write to databases, or provide a semantic layer. Redis, MongoDB, Dameng and other engines are not implemented.
+Version 0.2.0 manages **connections and metadata only**. It does not execute arbitrary SQL, read application rows, write to databases, or provide a semantic layer. Redis, MongoDB, Dameng and other engines are not implemented.
 
 ## Installation
 
 The API baseline is DSH `0.2.1-rc.3`; the manifest admits `>=0.2.1-rc.3 <0.3.0`, without claiming that every admitted release has been tested. The old DSH 0.1.6 desktop is not compatible.
 
-1. Download `dsh-db-connect-0.1.0.tgz` from [GitHub Releases](https://github.com/stitchmaps/dsh-db-connect/releases), or clone this repository. Install the archive or repository directory through the current DSH plugin manager using its local-package installation capability and an absolute path. Do not also append an insert entry manually.
+1. Download `dsh-db-connect-0.2.0.tgz` from [GitHub Releases](https://github.com/stitchmaps/dsh-db-connect/releases), or clone this repository. Install the archive or repository directory through the current DSH plugin manager using its local-package installation capability and an absolute path. Do not also append an insert entry manually.
 2. Prepare a separate Python environment (Windows x64 Python 3.12 recommended). SQLite uses only the standard library. Other drivers are listed in `python/requirements.txt`.
 3. Open **Databases → Runtime**, set the interpreter's absolute executable path, and run diagnostics. If left blank, the Host uses `DSH_DB_PYTHON`, then Python on PATH. It does not depend on DSH's private bundled runtime layout.
 4. Add/save a connection, then test it and browse its structure. Saving alone does not connect.
@@ -63,7 +64,7 @@ Python, Oracle Client/VC runtime and SQL Server ODBC installers must be supplied
 ## Model tools
 
 - `db_connections`: IDs, labels, types and revisions of explicitly enabled connections only.
-- `db_inspect`: `test`, `schemas`, `tables`, `columns`. Pages default to 100 rows, maximum 200; use `hasMore` and `offset`.
+- `db_inspect`: `test`, `schemas`, `tables`, `columns`, `indexes`. Pages default to 100 rows, maximum 200; use `hasMore` and `offset`. `columns` returns data type, nullability, default and comment; `indexes` returns primary key, index and foreign-key structure for one table.
 
 Tools cannot create profiles, change secrets, grant themselves access, or change Python settings. Metadata is untrusted data, not instructions. Enabling access sends metadata into model context; use a deployment appropriate to your intranet policy.
 

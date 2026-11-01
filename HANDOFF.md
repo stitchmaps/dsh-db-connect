@@ -4,7 +4,7 @@
 
 ## 一句话现状
 
-`dsh-db-connect@0.1.0` 已完成开发、测试、打包，已推送 GitHub 并发布 Release；社区插件市场投稿 PR 已提交，唯一未通过项是仓库年龄门槛（满 1 天自动清除）。npm 未登录，未发布 npm 包。
+本地 `dsh-db-connect@0.2.0` 已开发完成并通过测试（Node 26 项、Python 21 项），**尚未提交/推送 GitHub、未打新 Release、市场 PR 仍是 0.1.0 的内容**。线上仍是 `0.1.0`（GitHub Release v0.1.0 + 市场 PR #11031）。0.2.0 新增：字段默认值/注释、以及 `indexes` 动作（主键/唯一与其他索引/外键），UI 与 `db_inspect` 同步扩展。市场 PR #11031 唯一未过项仍是仓库满 1 天门槛（2026-11-02 03:01 UTC 后自动清除）。
 
 ## 目录
 
@@ -12,7 +12,7 @@
 - 工作区根索引：`E:\03_Project\Deepseek Harness插件开发\README.md`（已含本插件一行）
 - 本目录约定：见 `E:\03_Project\Deepseek Harness插件开发\AGENTS.md`
 
-## 已发布
+## 已发布（线上仍是 0.1.0）
 
 - GitHub：https://github.com/stitchmaps/dsh-db-connect （public；topics: database, deepseek-harness, dsh-plugin, oracle）
 - 首提交：`6982c9e feat: release independent database connector v0.1.0`
@@ -24,23 +24,34 @@
   - 状态：OPEN / MERGEABLE；基础 check 通过；**Submission gate 失败，唯一原因“repository is 0.0 days old (needs 1)”**
   - 官方说明：该 gate 自动重跑，约 24h 后自动清除，**不要重推、不要关重开、不要重提交**
 
-## 插件能力（0.1.0 边界，勿夸大）
+## 0.2.0 本地改动（尚未发布）
+
+- 版本号已改为 `0.2.0`（package.json + 宿主日志 + README/zh）。
+- `python/worker.py`：`columns` 增加 `default`、`comment`；新增 `indexes` 动作（主键/索引/外键，SQLite + Oracle + information_schema 通用路径）。
+- `lib/service.js`：智能体白名单加入 `indexes`，`indexes` 需要 table。
+- `lib/index.js`：`db_inspect` 增加 `indexes` 操作，描述补充 default/comment。
+- `lib/client.js`：字段表新增「默认值/备注」列；字段视图下嵌套「索引与键」区块；新增中英文案。
+- 测试：Node 26 / Python 21 全通过。
+- 待办：更新 `docs/validation.md`；`npm pack` 重建 tgz；提交、推送、打 v0.2.0 Release、更新市场条目（若 PR 仍开，可在维护者合并后单独提 0.2.0 变更）。
+
+## 插件能力（0.2.0 边界，勿夸大）
 
 - 连接管理：Oracle / PostgreSQL / MySQL / MariaDB / SQL Server / SQLite
 - Oracle 默认 Thick（oracledb==3.4.2，推荐 Client 19c Basic x64，目标 11.2.0.4）；现代库可用 Thin
-- 元数据浏览：schemas / tables / columns，分页 1–200
+- 元数据浏览：schemas / tables / columns（含数据类型、可空、默认值、注释）/ indexes（主键、唯一与其他索引、外键），分页 1–200
 - Windows 凭证：DPAPI CurrentUser 加密；其他平台仅进程内
 - 每连接独立“允许智能体访问元数据”，默认关闭
-- 工具：`db_connections`、`db_inspect`（test/schemas/tables/columns）
+- 工具：`db_connections`、`db_inspect`（test/schemas/tables/columns/indexes）
 - **不做**：任意 SQL、业务数据行、写库、语义层/Catalog、问数
+- 索引/外键取用说明：Oracle 走 all_ind_columns/all_constraints；PG/MySQL/MariaDB 走 information_schema（PG 无标准 indexes 视图，仅返回主键与外键）；SQL Server 目前只返回主键与外键（索引视图未接）；SQLite 走 PRAGMA table_info/index_list/index_info/foreign_key_list。远程索引查询为 mock 测试，未在真实远程库实测。
 
 ## 测试与验证证据
 
-- Node：24 项通过、0 跳过（`node --test tests/*.test.mjs`）
-- Python：18 项通过（`python -B -m unittest discover -s python -v`）
-- 含真实临时 SQLite 与 Windows DPAPI；远程驱动为 mock
-- 证据文件：`docs/validation.md`
-- **未验证**：真实 Oracle 11.2 / 其他远程库连通；当前 DSH GUI 内安装后的页面行为；离线脚本实际跑通
+- Node：26 项通过、0 跳过（`node --test tests/*.test.mjs`）
+- Python：21 项通过（`python -B -m unittest discover -s python -v`）
+- 含真实临时 SQLite（列默认值 / 主键 / 唯一 / 外键 / 索引）与 Windows DPAPI；远程驱动与远程索引为 mock
+- 证据文件：`docs/validation.md`（需按 0.2.0 更新）
+- **未验证**：真实 Oracle 11.2 / 其他远程库连通；远程库 indexes 实际返回；当前 DSH GUI 内安装后的页面行为；离线脚本实际跑通
 
 ## 复现测试（本机）
 

@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-独立于 HZsql、SQLBot 和 hz-workbench 的 DSH 插件。一个插件管理多个内网数据库连接，提供连接测试、驱动诊断及「模式 → 表 → 字段」浏览。界面和智能体工具调用同一套 Host 服务。
+独立于 HZsql、SQLBot 和 hz-workbench 的 DSH 插件。一个插件管理多个内网数据库连接，提供连接测试、驱动诊断及「模式 → 表 → 字段 / 键」浏览。界面和智能体工具调用同一套 Host 服务。
 
 ## 当前范围
 
@@ -11,15 +11,16 @@
 - Windows 密码使用当前用户 DPAPI 加密，密码不回显、不出现在工具参数和返回值、不放入命令行。
 - 每个连接单独开启「允许智能体访问元数据」，默认关闭。
 - 分页元数据、并发上限、超时强制终止、取消和插件卸载清理。
+- 字段明细（数据类型、可空、默认值、备注）与键结构视图（主键、唯一/其他索引、外键）。
 - 中文/英文界面、DSH 主题适配。
 
-**0.1.0 只提供连接和元数据能力，不执行用户 SQL，不读取业务数据行，不写库，不含语义层或交管业务。** Redis、MongoDB、达梦等尚未实现；没有把兼容协议当成已经验证的支持。
+**0.2.0 只提供连接和元数据能力，不执行用户 SQL，不读取业务数据行，不写库，不含语义层或交管业务。** Redis、MongoDB、达梦等尚未实现；没有把兼容协议当成已经验证的支持。
 
 ## 环境与安装
 
 目标 DSH API 基线：`0.2.1-rc.3`；清单允许 `>=0.2.1-rc.3 <0.3.0`，其他版本未逐一实测。旧桌面锁定的 DSH `0.1.6` 不兼容本插件。
 
-1. 从 [GitHub Releases](https://github.com/stitchmaps/dsh-db-connect/releases) 下载 `dsh-db-connect-0.1.0.tgz`，或克隆本仓库。使用当前 DSH 的插件管理器安装压缩包或仓库目录，在本地包安装入口填写绝对路径。不要同时手工追加 profile 的 insert 行。
+1. 从 [GitHub Releases](https://github.com/stitchmaps/dsh-db-connect/releases) 下载 `dsh-db-connect-0.2.0.tgz`，或克隆本仓库。使用当前 DSH 的插件管理器安装压缩包或仓库目录，在本地包安装入口填写绝对路径。不要同时手工追加 profile 的 insert 行。
 2. 准备独立 Python 环境。推荐 Windows x64 Python 3.12；SQLite 只需要 Python 标准库。其他数据库安装 `python/requirements.txt` 中的可选驱动。
 3. 打开左侧「数据库」→「运行环境」，填写该环境 `python.exe` 的绝对路径，执行「检查环境」。留空时使用 `DSH_DB_PYTHON`，再回退到 PATH 中的 Python；不会自动寻找或依赖 DSH 私有打包路径。
 4. 新建连接、保存，然后测试连接。保存配置不会自动联系数据库。
@@ -68,7 +69,7 @@ Oracle 需要特别说明：
 ## 智能体接口
 
 - `db_connections`：只列出用户启用的连接 ID、名称、类型和修订号。
-- `db_inspect`：`test / schemas / tables / columns`；默认 100 项，最多 200 项，使用 `hasMore + offset` 翻页。
+- `db_inspect`：`test / schemas / tables / columns / indexes`；默认 100 项，最多 200 项，使用 `hasMore + offset` 翻页。`columns` 返回数据类型、可空、默认值与备注；`indexes` 返回单表的主键、索引与外键结构。
 
 模型不能通过这些工具创建连接、改凭据、开启授权或修改 Python 路径。数据库名称、表名等是外部数据，不是模型指令。只在信任的 DSH 实例和网络边界下使用；启用元数据访问后，名称会进入模型上下文，应匹配你的内网模型与组织规定。
 

@@ -11,7 +11,7 @@ function load() {
     useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
   }
   // Expose private components only in this isolated VM, without changing the artifact.
-  const instrumented = source.replace('return {name:ID,inject:', 'return {test:{Editor:Editor,Runtime:Runtime,Panel:Panel,blank:blank,dictionaries:dictionaries},name:ID,inject:')
+  const instrumented = source.replace('return {name:ID,inject:', 'return {test:{Editor:Editor,Runtime:Runtime,Panel:Panel,MetadataPage:MetadataPage,IndexesView:IndexesView,blank:blank,dictionaries:dictionaries},name:ID,inject:')
   vm.runInNewContext(instrumented, { window: { __ModuleLoader__: { load: module => { plugin = module.factory(name => { assert.equal(name, 'react'); return React }) } } }, AbortController })
   return plugin
 }
@@ -59,4 +59,15 @@ test('runtime form matches host timeout range and explains credential reset', ()
   assert.equal(number.props.max, 120)
   assert.match(t('settingsHint'), /clears saved passwords/)
   assert.match(source, /onSettings:function\(value\)\{setSettings\(value\);load\(\)\}/)
+})
+
+test('columns view mounts an indexes section and both renders are crash-free', () => {
+  const plugin = load(), t = key => { assert.ok(plugin.test.dictionaries.en[key], key); return plugin.test.dictionaries.en[key] }
+  const nodes = flatten(plugin.test.MetadataPage({ t, columns: true, query: { op: 'columns', id: 'x', schema: 'main', table: 'sample' } }))
+  const headings = nodes.filter(n => n.type === 'h3').map(n => n.props.children.flat(Infinity).join(' '))
+  // Columns heading "columns · sample" plus the nested IndexesView heading "Indexes & keys".
+  assert.ok(headings.some(x => x === t('indexes')))
+  assert.ok(headings.some(x => x.includes('sample')))
+  const idx = flatten(plugin.test.IndexesView({ t, query: { op: 'indexes', id: 'x', schema: 'main', table: 'sample' } }))
+  assert.ok(idx.some(n => n.type === 'h3' && n.props.children.flat(Infinity).join(' ') === t('indexes')))
 })
