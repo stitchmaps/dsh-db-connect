@@ -1,0 +1,29 @@
+{
+  "name": "dsh-db-connect",
+  "version": "0.1.0",
+  "description": "Independent intranet database connections and schema browser for DeepSeek Harness",
+  "type": "module",
+  "main": "lib/index.js",
+  "icon": "icon.svg",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": ["lib", "python/worker.py", "python/requirements.txt", "scripts", "locale", "icon.svg", "cordis.patch.yml", "README.md", "README.zh.md", "docs", "LICENSE"],
+  "engines": {"node": ">=22.19.0", "dsh": ">=0.2.1-rc.3 <0.3.0"},
+  "peerDependencies": {"@deepseek-ai/dsh-tools": ">=0.2.1-rc.3 <0.3.0"},
+  "peerDependenciesMeta": {"@deepseek-ai/dsh-tools": {"optional": true}},
+  "scripts": {"test": "node --test tests/*.test.mjs", "check": "node --check lib/index.js && node --check lib/client.js"},
+  "dsh": {
+    "bundle": {"patch": "./cordis.patch.yml"},
+    "client": {"platform": "web", "inject": ["@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-layout", "@deepseek-ai/dsh-client-ui-sidebar"]}
+  },
+  "repository": {"type": "git", "url": "git+https://github.com/stitchmaps/dsh-db-connect.git"},
+  "homepage": "https://github.com/stitchmaps/dsh-db-connect#readme",
+  "bugs": {"url": "https://github.com/stitchmaps/dsh-db-connect/issues"},
+  "keywords": ["deepseek-harness", "dsh-plugin", "dsh", "cordis", "database", "oracle", "intranet"],
+  "license": "MIT"
+}

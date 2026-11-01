@@ -1,0 +1,9 @@
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+wheelhouse/
+dist/
+*.tgz
+*.log
+.env

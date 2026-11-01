@@ -1,0 +1,10 @@
+# Optional remote database drivers; SQLite and tests require only Python stdlib.
+# Legacy Oracle profile: 3.4.2 + Instant Client 19c supports Oracle 11.2.
+# This worker requires Client >=18 for call_timeout; Thin requires DB >=12.1.
+# Oracle 4.x/26.x have different database/client support; upgrade deliberately.
+oracledb==3.4.2
+psycopg[binary]>=3.2,<4
+# RSA extra supports caching_sha2_password / sha256_password authentication.
+# Worker pre-authentication TLS guard targets the PyMySQL 1.x API.
+PyMySQL[rsa]>=1.1,<2
+pyodbc>=5.1,<6
