@@ -2,7 +2,6 @@
 
 [English](README.md) | 中文
 
-独立于 HZsql、SQLBot 和 hz-workbench 的 DSH 插件。一个插件管理多个内网数据库连接，提供连接测试、驱动诊断及「模式 → 表 → 字段 / 键」浏览。界面和智能体工具调用同一套 Host 服务。
 
 ## 当前范围
 
