@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-An independent DeepSeek Harness plugin for intranet database connections, driver diagnostics, connection testing, and paged schema → table → column browsing. It has no dependency on HZsql, SQLBot, hz-workbench, traffic-domain assets, or their credentials.
+An independent DeepSeek Harness plugin for intranet database connections, driver diagnostics, connection testing, and paged schema → table → column browsing. It has no dependency on any existing internal business system, its assets, or its credentials.
 
 ## Features and scope
 
