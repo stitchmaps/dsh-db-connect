@@ -20,7 +20,7 @@
   - `dsh-db-connect-0.1.0.tgz`（39,394 字节）
   - `SHA256SUMS.txt`：`296b9066f976730d0d2adc9d07c841df65c4389f16e32715d620e1e6369f2c8a`
 - Release v0.2.0：https://github.com/stitchmaps/dsh-db-connect/releases/tag/v0.2.0
-  - `dsh-db-connect-0.2.0.tgz`（42,850 字节，SHA256 `4ab5be1a32c8ca9e7f2b6039a59ab95cb2b42b750de79fe6b2610c19d3a8e952`）
+  - `dsh-db-connect-0.2.0.tgz`（42,829 字节，SHA256 `d48e2f7142df79b0cce5798cb4bc9e7beecb15504ed0ccf46c419d9e19969467`；2026-11-17 重建以移除 README 中的内部项目名，同日替换原资产）
   - `SHA256SUMS-0.2.0.txt`
 - 市场投稿 PR：https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/11031
   - 状态：**MERGED**（2026-11-03 17:21 UTC，合并人 `fkysly`）；`check` 与 `Submission gate` 均通过
